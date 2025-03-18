@@ -1,0 +1,42 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Country {
+  iso2         String   @id @db.Char(2)  
+  countryName  String   @db.VarChar(255) 
+  timeZone     String   @db.VarChar(255)
+  headquarters Headquarters[] 
+  branches     Branch[]
+  @@unique([iso2])
+}
+
+model Headquarters {
+  swiftCode    String   @id @db.VarChar(11)
+  codeType     String?  @db.VarChar(50)
+  name         String?  @db.VarChar(255)
+  address      String?  @db.Text
+  townName     String?  @db.VarChar(255)
+  countryIso2  String   @db.Char(2)
+  country      Country  @relation(fields: [countryIso2], references: [iso2], onDelete: Cascade, onUpdate: Cascade) 
+  branches     Branch[]
+  @@unique([swiftCode])
+}
+
+model Branch {
+  swiftCode           String   @id @db.VarChar(11) 
+  codeType            String?  @db.VarChar(255)
+  name                String?  @db.VarChar(255)
+  address             String?  @db.Text
+  townName            String?  @db.VarChar(255)
+  countryIso2         String   @db.Char(2) 
+  headquarterSwiftCode String?   @db.VarChar(11)  
+  country             Country  @relation(fields: [countryIso2], references: [iso2], onDelete: Cascade, onUpdate: Cascade) 
+  headquarter         Headquarters? @relation(fields: [headquarterSwiftCode], references: [swiftCode], onDelete: Cascade, onUpdate: Cascade)
+  @@unique([swiftCode])
+}
