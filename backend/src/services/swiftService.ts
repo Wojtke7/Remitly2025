@@ -1,103 +1,132 @@
-import * as XLSX from 'xlsx';
+import { DatabaseService } from './databaseService';
+import { XLSXParser } from '../utils/xlsxParser';
+import Headquarter from '../types/Headquarter';
+import Branch from '../types/Branch';
+import path from 'path';
+import fs from 'fs/promises';
 import { PrismaClient } from '@prisma/client';
-import ExcelRow from '../types/ExcelRow';
+import CountryResponse from '../types/CountryResponse';
 
 const prisma = new PrismaClient();
+export class SwiftService {
+    private databaseService: DatabaseService;
+    private xlsxParser: XLSXParser;
 
-async function upsertCountry(row: ExcelRow) {
-    await prisma.country.upsert({
-      where: { iso2: row['COUNTRY ISO2 CODE'] },
-      update: {},
-      create: {
-        iso2: row['COUNTRY ISO2 CODE'],
-        countryName: row['COUNTRY NAME'],
-        timeZone: row['TIME ZONE'], 
-      },
-    });
-  }
-  
-  async function createHeadquarters(row: ExcelRow) {
-    await prisma.headquarters.create({
-      data: {
-        swiftCode: row['SWIFT CODE'],
-        codeType: row['CODE TYPE'],
-        name: row['NAME'],
-        address: row['ADDRESS'],
-        townName: row['TOWN NAME'],
-        countryIso2: row['COUNTRY ISO2 CODE'],
-      },
-    });
-  }
-  
-  async function createBranch(row: ExcelRow) {
-    let headquarterSwiftCode = row['SWIFT CODE'].slice(0, -3) + 'XXX';
-  
-    try {
-      await prisma.branch.create({
-        data: {
-          swiftCode: row['SWIFT CODE'],
-          name: row['NAME'],
-          codeType: row['CODE TYPE'],
-          address: row['ADDRESS'],
-          townName: row['TOWN NAME'],
-          countryIso2: row['COUNTRY ISO2 CODE'],
-          headquarterSwiftCode: headquarterSwiftCode,
-        },
-      });
-    } catch (error) {
-      if ((error as any).code === 'P2003') {
-  
-        await prisma.branch.create({
-          data: {
-            swiftCode: row['SWIFT CODE'],
-            name: row['NAME'],
-            codeType: row['CODE TYPE'],
-            address: row['ADDRESS'],
-            townName: row['TOWN NAME'],
-            countryIso2: row['COUNTRY ISO2 CODE'],
-            headquarterSwiftCode: null, 
-          },
-        });
-      } else {
-        console.error('Error inserting branch:', error);
-      }
-    }
-  }
-  
-  
-    function parseXLSX(): ExcelRow[] {
-        const workbook = XLSX.readFile('../../static/swift.xlsx');
-        const worksheet = workbook.Sheets[workbook.SheetNames[0]];
-        const jsonData = XLSX.utils.sheet_to_json<ExcelRow>(worksheet, {
-        defval: "",
-        });
-        
-        const sortedData = jsonData.sort((a, b) => {
-            const aEndsWithXXX = a['SWIFT CODE'].endsWith("XXX") ? 0 : 1;
-            const bEndsWithXXX = b['SWIFT CODE'].endsWith("XXX") ? 0 : 1;
-            return aEndsWithXXX - bEndsWithXXX;
-        });
-        
-        return sortedData;
+    constructor() {
+        this.databaseService = new DatabaseService();
+        this.xlsxParser = new XLSXParser();
     }
 
-    async function insertDataIntoDB(sortedData: ExcelRow[]): Promise<void> {
-        for (const row of sortedData) {
-            try {
-                await upsertCountry(row);
+    async insertDataIntoDB(filePath: string): Promise<void> {
+        try {
+            const absolutePath = path.isAbsolute(filePath) ? filePath : path.join(process.cwd(), filePath);
+            await fs.access(absolutePath);
+
+            const sortedData = this.xlsxParser.parseXLSX(absolutePath);
+
+            const operations = sortedData.map(async (row) => {
+                try {
+                    await this.databaseService.upsertCountry(row);
                     if (row['SWIFT CODE'].endsWith('XXX')) {
-                    await createHeadquarters(row);
-                } else {
-                    await createBranch(row);
+                        return await this.databaseService.createHeadquarters(row);
+                    } else {
+                        return await this.databaseService.createBranch(row);
+                    }
+                } catch (error) {
+                    console.error(`Error processing row ${JSON.stringify(row)}:`, error);
                 }
-            } catch (error) {
-                if ((error as any).code === 'P2003') {
-                        console.log(row["SWIFT CODE"])
-                }
-                console.error('Error inserting data:', error);
+            });
+
+            await Promise.allSettled(operations);
+
+        } catch (error) {
+            throw new Error('File not found or database error.');
+        }
+    }
+    
+    async getSwiftCode(swiftCode: string): Promise<Headquarter | Branch | null> {
+        try {
+            const headquarter = await this.databaseService.getHeadquarterBySwiftCode(swiftCode);
+
+            if (headquarter) {
+                const response = {
+                    address: headquarter.address,
+                    bankName: headquarter.name,
+                    countryISO2: headquarter.countryIso2,
+                    countryName: headquarter.country.countryName,
+                    isHeadquarter: true,
+                    swiftCode: headquarter.swiftCode,
+                    branches: headquarter.branches.map(branch => ({
+                        address: branch.address,
+                        bankName: branch.name,
+                        countryISO2: branch.countryIso2,
+                        countryName: branch.country.countryName,
+                        isHeadquarter: false,
+                        swiftCode: branch.swiftCode,
+                    })),
+                };
+                return response;
+            }
+
+            const branch = await this.databaseService.getBranchBySwiftCode(swiftCode);
+
+            if (branch) {
+                return {
+                    address: branch.address,
+                    bankName: branch.name,
+                    countryISO2: branch.countryIso2,
+                    countryName: branch.country.countryName,
+                    isHeadquarter: false,
+                    swiftCode: branch.swiftCode,
+                };
+            }
+
+            return null
+        } catch (error) {
+            if (error instanceof Error) {
+                throw new Error(error.message); 
+            } else {
+                throw new Error("An unexpected error occurred");
             }
         }
     }
 
-  const data = parseXLSX()
-  insertDataIntoDB(data);
+    async getSwiftCodesByCountry(countryISO2: string): Promise<CountryResponse | null> {
+        try {
+            const country = await this.databaseService.getSwiftCodesByCountry(countryISO2);
+
+            if (!country) {
+                return null
+            }
+
+            const response = {
+                countryISO2: country.iso2,
+                countryName: country.countryName,
+                swiftCodes: [
+                    ...country.headquarters.map(headquarter => ({
+                        address: headquarter.address,
+                        bankName: headquarter.name,
+                        countryISO2: headquarter.countryIso2,
+                        isHeadquarter: true,
+                        swiftCode: headquarter.swiftCode,
+                    })),
+                    ...country.branches.map(branch => ({
+                        address: branch.address,
+                        bankName: branch.name,
+                        countryISO2: branch.countryIso2,
+                        isHeadquarter: false,
+                        swiftCode: branch.swiftCode,
+                    })),
+                ],
+            };
+
+            return response;
+        } catch (error) {
+            if (error instanceof Error) {
+                throw new Error(error.message); 
+            } else {
+                throw new Error("An unexpected error occurred");
+            }
+        }
+    }
+}
