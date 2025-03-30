@@ -1,4 +1,4 @@
-import Branch from "./Branch"
+import Branch from "./BranchI"
 
 export default interface Headquarter {
     "address": string | null,

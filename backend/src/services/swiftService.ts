@@ -1,11 +1,12 @@
 import { DatabaseService } from './databaseService';
 import { XLSXParser } from '../utils/xlsxParser';
 import Headquarter from '../types/Headquarter';
-import Branch from '../types/Branch';
+import Branch from '../types/BranchI';
 import path from 'path';
 import fs from 'fs/promises';
 import { PrismaClient } from '@prisma/client';
 import CountryResponse from '../types/CountryResponse';
+import { ErrorWithStatus } from '../utils/errorWithStatus';
 
 const prisma = new PrismaClient();
 export class SwiftService {
@@ -127,6 +128,32 @@ export class SwiftService {
             } else {
                 throw new Error("An unexpected error occurred");
             }
+        }
+    }
+
+    async addSwift(data: Branch): Promise<any> {
+        try {
+            if (data.isHeadquarter) {
+                return await this.databaseService.addHeadquarter(data);
+            }
+
+            return await this.databaseService.addBranch(data);
+        } catch (error) {
+            if (error instanceof ErrorWithStatus) {
+                throw error;
+            }
+            throw new ErrorWithStatus(500, 'An error occurred while processing the request.');
+        }
+    }
+
+    async deleteSwift(swiftCode: string): Promise<{message: string}> {
+        try {
+            return await this.databaseService.deleteBank(swiftCode)
+        } catch (error) {
+            if (error instanceof ErrorWithStatus) {
+                throw error;
+            }
+            throw new ErrorWithStatus(500, 'An error occurred while processing the request.');
         }
     }
 }

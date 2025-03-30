@@ -1,5 +1,8 @@
 import { Handler, Request, RequestHandler, Response } from 'express';
 import { SwiftService } from '../services/swiftService';
+import { ErrorWithStatus } from '../utils/errorWithStatus';
+import { Branch } from '@prisma/client';
+import BranchI from '../types/BranchI'
 
 const swiftService = new SwiftService();
 
@@ -87,8 +90,40 @@ const getSwiftCodesByCountry: RequestHandler = async (req: Request, res: Respons
     }
 }
 
+
+
+const addSwiftCode: RequestHandler = async (req: Request, res: Response) => {
+    const data = req.body
+    try {
+        const response = await swiftService.addSwift(data)
+        res.status(201).json(response)
+    } catch (err) {
+        if (err instanceof ErrorWithStatus) {
+            res.status(err.status).json({ message: err.message });
+            return;
+        }
+        res.status(500).json({ message: "An unexpected error occurred" });
+    }
+}
+
+const deleteSwiftCode: RequestHandler = async (req: Request, res: Response) => {
+    const swiftCode = req.params.swiftCode
+    try {
+        const response = await swiftService.deleteSwift(swiftCode)
+        res.status(200).json(response)
+    } catch(err) {
+        if (err instanceof ErrorWithStatus) {
+            res.status(err.status).json({ message: err.message });
+            return;
+        }
+        res.status(500).json({ message: "An unexpected error occurred" });
+    }
+}
+
 export {
     parseDataIntoDB,
     getSwiftCode,
-    getSwiftCodesByCountry
+    getSwiftCodesByCountry,
+    addSwiftCode,
+    deleteSwiftCode
 }
