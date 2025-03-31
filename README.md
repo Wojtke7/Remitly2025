@@ -52,7 +52,7 @@ chmod +x entrypoint.sh
 ## 🗄️ Database Schema  
 Below is the entity-relationship diagram (ERD) of the database structure:
 
-![Database Schema](docs/database-schema_white.png)
+![Database Schema](docs/db_schema_white.png)
 
 The database contains three main entities:
 
