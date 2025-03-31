@@ -25,8 +25,16 @@ export class DatabaseService {
 
     async createHeadquarters(row: ExcelRow) {
         try {
-            await prisma.headquarters.create({
-                data: {
+            await prisma.headquarters.upsert({
+                where: { swiftCode: row['SWIFT CODE'] },
+                update: {
+                    codeType: row['CODE TYPE'],
+                    name: row['NAME'],
+                    address: row['ADDRESS'],
+                    townName: row['TOWN NAME'],
+                    countryIso2: row['COUNTRY ISO2 CODE'],
+                },
+                create: {
                     swiftCode: row['SWIFT CODE'],
                     codeType: row['CODE TYPE'],
                     name: row['NAME'],
@@ -35,50 +43,45 @@ export class DatabaseService {
                     countryIso2: row['COUNTRY ISO2 CODE'],
                 },
             });
+
         } catch (error) {
-            if ((error as any).code === 'P2002') {
-                throw new ErrorWithStatus(400, `Headquarter with swiftCode "${row['SWIFT CODE']}" already exists.`);
-            }
-            throw new ErrorWithStatus(500, "An error occurred while creating headquarter.");
+            throw new ErrorWithStatus(500, "An error occurred while creating/updating headquarter.");
         }
     }
 
     async createBranch(row: ExcelRow) {
-        let headquarterSwiftCode = row['SWIFT CODE'].slice(0, -3) + 'XXX';
-
+        const headquarterSwiftCode = row['SWIFT CODE'].slice(0, -3) + 'XXX';
         try {
-            await prisma.branch.create({
-                data: {
+            const existingHeadquarter = await prisma.headquarters.findUnique({
+                where: { swiftCode: headquarterSwiftCode },
+                select: { swiftCode: true },
+            });
+            
+            await prisma.branch.upsert({
+                where: { swiftCode: row['SWIFT CODE'] },
+                update: {
+                    name: row['NAME'],
+                    codeType: row['CODE TYPE'],
+                    address: row['ADDRESS'],
+                    townName: row['TOWN NAME'],
+                    countryIso2: row['COUNTRY ISO2 CODE'],
+                    headquarterSwiftCode: existingHeadquarter ? headquarterSwiftCode : null,
+                },
+                create: {
                     swiftCode: row['SWIFT CODE'],
                     name: row['NAME'],
                     codeType: row['CODE TYPE'],
                     address: row['ADDRESS'],
                     townName: row['TOWN NAME'],
                     countryIso2: row['COUNTRY ISO2 CODE'],
-                    headquarterSwiftCode: headquarterSwiftCode,
+                    headquarterSwiftCode: existingHeadquarter ? headquarterSwiftCode : null,
                 },
             });
         } catch (error) {
-            if ((error as any).code === 'P2003') {
-                await prisma.branch.create({
-                    data: {
-                        swiftCode: row['SWIFT CODE'],
-                        name: row['NAME'],
-                        codeType: row['CODE TYPE'],
-                        address: row['ADDRESS'],
-                        townName: row['TOWN NAME'],
-                        countryIso2: row['COUNTRY ISO2 CODE'],
-                        headquarterSwiftCode: null,
-                    },
-                });
-            } 
-            else if ((error as any).code === 'P2002') {
-                throw new ErrorWithStatus(400, `Headquarter with swiftCode "${row['SWIFT CODE']}" already exists.`);
-            } else {
-                throw new ErrorWithStatus(500, "An error occurred while creating branch.");
-            }
+            throw new ErrorWithStatus(500, "An error occurred while creating/updating branch.");
         }
     }
+    
 
     async getHeadquarterBySwiftCode(swiftCode: string) {
         try {
@@ -93,10 +96,6 @@ export class DatabaseService {
                     },
                 },
             });
-
-            if (!headquarter) {
-                throw new ErrorWithStatus(404, `Headquarter with swiftCode "${swiftCode}" not found.`);
-            }
 
             return headquarter
         } catch (error) {
@@ -117,11 +116,7 @@ export class DatabaseService {
                     },
                 },
             });
-
-            if (!branch) {
-                throw new ErrorWithStatus(404, `Branch with swiftCode "${swiftCode}" not found.`);
-            }
-
+            
             return branch
         }
         catch (error) {
@@ -153,7 +148,12 @@ export class DatabaseService {
 
             return country;
         } catch (error) {
-            throw new ErrorWithStatus(500, 'Error retrieving swift codes by country')
+            if (error instanceof ErrorWithStatus) {
+                throw error;
+            } 
+            else {            
+                throw new ErrorWithStatus(500, 'Error retrieving swift codes by country')
+            }
         }
     }
 
@@ -162,6 +162,9 @@ export class DatabaseService {
             if (data.swiftCode.length < 8 || data.swiftCode.length > 11) {
                 throw new ErrorWithStatus(400, "swiftCode must be between 8 and 11 characters.");
             }
+    
+            const swiftPrefix = data.swiftCode.substring(0, 8);
+    
             await prisma.$transaction(async (tx) => {
                 await tx.country.upsert({
                     where: { iso2: data.countryISO2 },
@@ -169,7 +172,7 @@ export class DatabaseService {
                     create: { iso2: data.countryISO2, countryName: data.countryName }
                 });
     
-                await tx.headquarters.create({
+                const headquarter = await tx.headquarters.create({
                     data: {
                         swiftCode: data.swiftCode,
                         codeType: "BIC11",
@@ -178,8 +181,17 @@ export class DatabaseService {
                         countryIso2: data.countryISO2
                     }
                 });
+    
+                await tx.branch.updateMany({
+                    where: {
+                        swiftCode: { startsWith: swiftPrefix },
+                        headquarterSwiftCode: null
+                    },
+                    data: { headquarterSwiftCode: headquarter.swiftCode }
+                });
             });
             return { message: "Bank headquarter created successfully." };
+
         } catch (error) {
             if (error instanceof Prisma.PrismaClientKnownRequestError) {
                 switch (error.code) {

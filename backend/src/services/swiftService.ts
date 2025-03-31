@@ -22,29 +22,24 @@ export class SwiftService {
         try {
             const absolutePath = path.isAbsolute(filePath) ? filePath : path.join(process.cwd(), filePath);
             await fs.access(absolutePath);
-
+    
             const sortedData = this.xlsxParser.parseXLSX(absolutePath);
-
             const operations = sortedData.map(async (row) => {
-                try {
-                    await this.databaseService.upsertCountry(row);
-                    if (row['SWIFT CODE'].endsWith('XXX')) {
-                        return await this.databaseService.createHeadquarters(row);
-                    } else {
-                        return await this.databaseService.createBranch(row);
-                    }
-                } catch (error) {
-                    console.error(`Error processing row ${JSON.stringify(row)}:`, error);
+                await this.databaseService.upsertCountry(row);
+                if (row['SWIFT CODE'].endsWith('XXX')) {
+                    return await this.databaseService.createHeadquarters(row);
+                } else {
+                    return await this.databaseService.createBranch(row);
                 }
             });
-
+    
             await Promise.allSettled(operations);
-
+    
         } catch (error) {
-            throw new Error('File not found or database error.');
+            throw error
         }
     }
-    
+
     async getSwiftCode(swiftCode: string): Promise<Headquarter | Branch | null> {
         try {
             const headquarter = await this.databaseService.getHeadquarterBySwiftCode(swiftCode);
@@ -82,23 +77,19 @@ export class SwiftService {
                 };
             }
 
-            return null
+            throw new ErrorWithStatus(404, `Bank with swiftCode "${swiftCode}" not found.`);
+            
         } catch (error) {
-            if (error instanceof Error) {
-                throw new Error(error.message); 
-            } else {
-                throw new Error("An unexpected error occurred");
+            if (error instanceof ErrorWithStatus) {
+                throw error;
             }
+            throw new ErrorWithStatus(500, 'An unexpected error occurred');
         }
     }
 
     async getSwiftCodesByCountry(countryISO2: string): Promise<CountryResponse | null> {
         try {
             const country = await this.databaseService.getSwiftCodesByCountry(countryISO2);
-
-            if (!country) {
-                return null
-            }
 
             const response = {
                 countryISO2: country.iso2,
@@ -123,11 +114,10 @@ export class SwiftService {
 
             return response;
         } catch (error) {
-            if (error instanceof Error) {
-                throw new Error(error.message); 
-            } else {
-                throw new Error("An unexpected error occurred");
+            if (error instanceof ErrorWithStatus) {
+                throw error;
             }
+            throw new ErrorWithStatus(500, 'An unexpected error occurred');
         }
     }
 
@@ -140,20 +130,20 @@ export class SwiftService {
             return await this.databaseService.addBranch(data);
         } catch (error) {
             if (error instanceof ErrorWithStatus) {
-                throw error;
+                throw error; 
             }
-            throw new ErrorWithStatus(500, 'An error occurred while processing the request.');
+            throw new ErrorWithStatus(500, 'An unexpected error occurred.');
         }
     }
 
     async deleteSwift(swiftCode: string): Promise<{message: string}> {
         try {
-            return await this.databaseService.deleteBank(swiftCode)
+            return await this.databaseService.deleteBank(swiftCode);
         } catch (error) {
             if (error instanceof ErrorWithStatus) {
                 throw error;
             }
-            throw new ErrorWithStatus(500, 'An error occurred while processing the request.');
+            throw new ErrorWithStatus(500, 'An unexpected error occurred.');
         }
     }
 }

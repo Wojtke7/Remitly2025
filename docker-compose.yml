@@ -1,0 +1,59 @@
+version: '3.7'
+
+services:
+  postgres:
+    image: postgres:15
+    restart: unless-stopped
+    environment:
+      - POSTGRES_DB=postgres
+      - POSTGRES_USER=user
+      - POSTGRES_PASSWORD=prisma
+    ports:
+      - "5432:5432"
+    networks:
+      - prisma-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U user -d postgres"]
+      interval: 5s
+      timeout: 2s
+      retries: 20
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      - DATABASE_URL=postgresql://user:prisma@postgres:5432/postgres
+      - PORT=8080
+    ports:
+      - "8080:8080"
+    networks:
+      - prisma-network
+    volumes:
+      - ./backend:/app
+
+  tests:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    depends_on:
+      backend:
+        condition: service_started
+    environment:
+      - DATABASE_URL=postgresql://user:prisma@postgres:5432/postgres
+    networks:
+      - prisma-network
+    volumes:
+      - ./backend:/app
+    command: ["sh", "-c", "npm test"]
+
+networks:
+  prisma-network:
+
+volumes:
+  postgres_data:
