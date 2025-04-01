@@ -27,7 +27,7 @@ cd Remitly2025
 🛠️ Building & Running the Application
 --------------------------------------
 
-### 1️⃣ Build the Docker image (includes unit and integration tests):
+### 1️⃣ Build the Docker image (includes tests):
 
 ```
 docker compose build --no-cache
